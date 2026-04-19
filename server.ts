@@ -102,6 +102,38 @@ app.get("/api/recent", async (req, res) => {
   }
 });
 
+app.get("/api/popular", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const endpoint = `/most-popular?page=${page}`;
+
+    const htmlRes = await fetchKaido(endpoint);
+    const html = await htmlRes.text();
+    const $ = cheerio.load(html);
+
+    const results: any[] = [];
+    $(".flw-item").each((_, el) => {
+      const title = $(el).find(".dynamic-name").text().trim() || $(el).find(".film-name a").text().trim();
+      const idStr = $(el).find(".film-poster-ahref").attr("href") || $(el).find(".film-name a").attr("href") || "";
+      const id = idStr.split("?")[0].replace("/", "");
+      const poster = $(el).find(".film-poster-img").attr("data-src") || $(el).find(".film-poster-img").attr("src") || "";
+      const type = $(el).find(".fdi-item").first().text().trim();
+      const duration = $(el).find(".fdi-duration").text().trim();
+      const sub = $(el).find(".tick-sub").text().trim() || 0;
+      const dub = $(el).find(".tick-dub").text().trim() || 0;
+
+      if (id) {
+        results.push({ id, title, poster, type, duration, sub, dub });
+      }
+    });
+
+    res.json({ results });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch popular anime" });
+  }
+});
+
 app.get("/api/az", async (req, res) => {
   try {
     const char = req.query.char as string || "A";
@@ -314,8 +346,18 @@ app.get('/api/proxy', async (req, res) => {
         }
 
         if (queryUrl.includes('.m3u8')) {
-            const proxyRes = await axios.get(queryUrl, { headers, responseType: 'text' });
+            const proxyRes = await axios.get(queryUrl, { 
+                headers, 
+                responseType: 'text',
+                validateStatus: () => true 
+            });
+            
             let text = proxyRes.data;
+            if (proxyRes.status >= 400 || typeof text !== 'string' || !text.includes('#EXTM3U')) {
+                 res.status(proxyRes.status >= 400 ? proxyRes.status : 500).send(text);
+                 return;
+            }
+
             const absoluteUrlBase = new URL(queryUrl).href.replace(/\/[^\/]*$/, '/');
             const rewritten = text.replace(/^(?!#)(.+)$/gm, (match: string) => {
                 if (!match.trim()) return match;

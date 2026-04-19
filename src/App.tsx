@@ -276,10 +276,18 @@ const HlsPlayer = ({
       let playlistUrl = level.url ? (Array.isArray(level.url) ? level.url[0] : level.url) : null;
       if (!playlistUrl && level.attrs && level.attrs.URI) {
          playlistUrl = level.attrs.URI;
-         if (!playlistUrl.startsWith('http')) {
-             const base = new URL(src).href.replace(/\/[^\/]*$/, '/');
-             playlistUrl = base + playlistUrl;
-         }
+      }
+
+      if (playlistUrl && playlistUrl.includes('/api/proxy?url=')) {
+          playlistUrl = decodeURIComponent(playlistUrl.split('/api/proxy?url=')[1]);
+      }
+      
+      if (playlistUrl && !playlistUrl.startsWith('http')) {
+          try {
+             playlistUrl = new URL(playlistUrl, src).href;
+          } catch(e) {
+             console.error("URL parsing error:", e);
+          }
       }
       
       if (!playlistUrl) {
@@ -290,6 +298,15 @@ const HlsPlayer = ({
       const res = await fetch(finalPlaylistUrl);
       const text = await res.text();
 
+      if (!res.ok) {
+          throw new Error("Failed to fetch quality playlist from server.");
+      }
+      
+      if (!text.includes('#EXTM3U')) {
+          console.error("Invalid M3U8 content:", text.substring(0, 100));
+          throw new Error("Received invalid playlist data (expected M3U8).");
+      }
+
       const lines = text.split('\n');
       const tsUrls: string[] = [];
       const absoluteBase = new URL(playlistUrl).href.replace(/\/[^\/]*$/, '/');
@@ -297,8 +314,14 @@ const HlsPlayer = ({
       for (const line of lines) {
         if (line.trim() && !line.startsWith('#')) {
           let url = line.trim();
-          if (!url.startsWith('http')) {
-            url = absoluteBase + url;
+          if (url.includes('/api/proxy?url=')) {
+              url = decodeURIComponent(url.split('/api/proxy?url=')[1]);
+          } else if (!url.startsWith('http')) {
+            try {
+               url = new URL(url, playlistUrl).href;
+            } catch(e) {
+               console.error("URL segment parse error:", e);
+            }
           }
           tsUrls.push(url);
         }
@@ -642,10 +665,14 @@ export default function App() {
   const [results, setResults] = useState<AnimeResult[]>([]);
 
   const [recentUpdates, setRecentUpdates] = useState<AnimeResult[]>([]);
+  const [popularUpdates, setPopularUpdates] = useState<AnimeResult[]>([]);
   const [trending, setTrending] = useState<TrendingAnime[]>([]);
   const [recentPage, setRecentPage] = useState(1);
+  const [popularPage, setPopularPage] = useState(1);
   const [recentLoading, setRecentLoading] = useState(false);
+  const [popularLoading, setPopularLoading] = useState(false);
   const [hasMoreRecent, setHasMoreRecent] = useState(true);
+  const [hasMorePopular, setHasMorePopular] = useState(true);
 
   const [azResults, setAzResults] = useState<AnimeResult[]>([]);
   const [azLoading, setAzLoading] = useState(false);
@@ -747,8 +774,34 @@ export default function App() {
     setRecentLoading(false);
   };
 
+  const fetchPopular = async (page: number) => {
+    if (popularLoading) return;
+    setPopularLoading(true);
+    try {
+      const res = await fetch(`/api/popular?page=${page}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          setPopularUpdates(data.results);
+          setPopularPage(page);
+          setHasMorePopular(true);
+        } else {
+          setHasMorePopular(false);
+          if (page === 1) setPopularUpdates([]);
+        }
+      } else {
+        setHasMorePopular(false);
+      }
+    } catch (err) {
+      console.error("Failed to fetch popular updates", err);
+      setHasMorePopular(false);
+    }
+    setPopularLoading(false);
+  };
+
   useEffect(() => {
     fetchRecent(1);
+    fetchPopular(1);
   }, []);
 
   useEffect(() => {
@@ -1328,6 +1381,95 @@ export default function App() {
                       className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors border border-white/10 flex items-center"
                     >
                       {recentLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          Next <ChevronRight className="w-4 h-4 ml-1" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+                
+                {/* Popular Anime Section */}
+                <h2 id="popular-section" className="text-2xl font-bold mt-12 mb-6 flex items-center gap-2">
+                  <TrendingUp className="w-6 h-6 text-[#FF3E3E]" />
+                  Popular
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 gap-y-8">
+                  {popularUpdates.map((anime, idx) => (
+                    <div
+                      key={anime.id + "-pop-" + idx}
+                      onClick={() => getInfo(anime)}
+                      className="group cursor-pointer flex flex-col gap-3 outline-none"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => e.key === "Enter" && getInfo(anime)}
+                    >
+                      <div className="relative aspect-[2/3] overflow-hidden rounded-xl bg-[#121212] shadow-md ring-1 ring-white/10 group-hover:ring-[#FF3E3E]/50 transition-all duration-300">
+                        <img
+                          src={anime.poster}
+                          alt={anime.title}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/0 to-black/0 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4">
+                          <div className="w-10 h-10 rounded-full bg-[#FF3E3E] text-white flex items-center justify-center transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+                            <Play className="w-5 h-5 ml-1" />
+                          </div>
+                        </div>
+                        <div className="absolute top-2 left-2 flex flex-col gap-1.5">
+                          {anime.sub && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-white/90 text-black backdrop-blur-sm shadow-sm flex items-center">
+                              SUB {anime.sub}
+                            </span>
+                          )}
+                          {anime.dub && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[#FF3E3E]/90 text-white backdrop-blur-sm shadow-sm flex items-center">
+                              DUB {anime.dub}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-sm text-white line-clamp-2 leading-snug group-hover:text-[#FF3E3E] transition-colors">
+                          {anime.title}
+                        </h3>
+                        {anime.type && (
+                          <p className="text-xs text-[#A0A0A0] mt-1.5 flex items-center gap-2">
+                            <span>{anime.type}</span>
+                            <span className="w-1 h-1 rounded-full bg-white/20"></span>
+                            <span>{anime.duration}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {popularUpdates.length > 0 && (
+                  <div className="py-8 flex items-center justify-center gap-4 mt-4">
+                    <button
+                      onClick={() => {
+                        fetchPopular(popularPage - 1);
+                        document.getElementById("popular-section")?.scrollIntoView({ behavior: "smooth" });
+                      }}
+                      disabled={popularPage === 1 || popularLoading}
+                      className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors border border-white/10 flex items-center"
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" /> Prev
+                    </button>
+                    <span className="text-[#A0A0A0] font-medium text-sm">
+                      Page {popularPage}
+                    </span>
+                    <button
+                      onClick={() => {
+                        fetchPopular(popularPage + 1);
+                        document.getElementById("popular-section")?.scrollIntoView({ behavior: "smooth" });
+                      }}
+                      disabled={!hasMorePopular || popularLoading}
+                      className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors border border-white/10 flex items-center"
+                    >
+                      {popularLoading ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
                         <>
