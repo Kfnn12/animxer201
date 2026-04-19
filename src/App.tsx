@@ -1070,7 +1070,7 @@ export default function App() {
             </span>
           </button>
 
-          <div className="flex-1 max-w-xl ml-4">
+          <div className="flex-1 max-w-xl mx-4">
             <form onSubmit={searchAnime} className="relative group">
               <input
                 type="text"
@@ -1085,6 +1085,15 @@ export default function App() {
               <Search className="w-4 h-4 text-[#A0A0A0] absolute left-4 top-1/2 -translate-y-1/2 group-focus-within:text-[#FF3E3E] transition-colors" />
             </form>
           </div>
+
+          <a 
+            href="/animxer.apk" 
+            download="animxer.apk"
+            className="hidden sm:flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm font-medium transition-colors"
+          >
+            <Download className="w-4 h-4 text-[#FF3E3E]" />
+            <span className="text-white">Get App</span>
+          </a>
         </div>
       </header>
 
@@ -2415,12 +2424,12 @@ export default function App() {
                   Close
                 </button>
                 <a
-                  href={`https://9xbuddy.com/process?url=${encodeURIComponent(sourceLink)}`}
+                  href={`intent://9xbuddy.com/process?url=${encodeURIComponent(sourceLink)}#Intent;scheme=https;package=com.android.chrome;end`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-5 py-2.5 text-sm font-bold bg-[#FF3E3E] hover:bg-[#ff5555] text-white rounded-xl shadow-lg shadow-[#FF3E3E]/20 transition-all hover:scale-105"
                 >
-                  Download using 9xbuddy
+                  App Download Link
                 </a>
               </div>
             </motion.div>
