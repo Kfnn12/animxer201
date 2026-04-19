@@ -708,6 +708,7 @@ export default function App() {
     AnimeResult | TrendingAnime | null
   >(null);
   const [animeInfo, setAnimeInfo] = useState<AnimeInfo | null>(null);
+  const [recommendedPage, setRecommendedPage] = useState(1);
 
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
 
@@ -892,6 +893,7 @@ export default function App() {
     setView("info");
     setLoading(true);
     setAnimeInfo(null);
+    setRecommendedPage(1);
     setError(null);
     setNextEpisode(null);
     try {
@@ -1039,6 +1041,13 @@ export default function App() {
       ? `https://kaido.to/watch/${selectedAnime.id}?ep=${selectedEpisode.id}`
       : `https://kaido.to/watch/${selectedAnime.id}`
     : "";
+
+  const RECOMMENDED_PER_PAGE = 12;
+  const paginatedRecommended = animeInfo?.recommended?.slice(
+    (recommendedPage - 1) * RECOMMENDED_PER_PAGE,
+    recommendedPage * RECOMMENDED_PER_PAGE
+  ) || [];
+  const maxRecommendedPage = Math.ceil((animeInfo?.recommended?.length || 0) / RECOMMENDED_PER_PAGE);
 
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans selection:bg-[#FF3E3E]/30 selection:text-white">
@@ -1639,14 +1648,13 @@ export default function App() {
 
             {/* Recommendations Dropdown Match For Info View */}
             {view === "info" &&
-              animeInfo?.recommended &&
-              animeInfo.recommended.length > 0 && (
-                <div className="mt-12">
+              paginatedRecommended.length > 0 && (
+                <div id="recommended-section-info" className="mt-12">
                   <h2 className="text-xl font-bold text-white mb-6 border-l-4 border-[#FF3E3E] pl-3">
                     Recommended For You
                   </h2>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                    {animeInfo.recommended.map((anime) => (
+                    {paginatedRecommended.map((anime) => (
                       <button
                         key={anime.id}
                         onClick={() => {
@@ -1692,6 +1700,33 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                  {maxRecommendedPage > 1 && (
+                    <div className="py-8 flex items-center justify-center gap-4 mt-4">
+                      <button
+                        onClick={() => {
+                          setRecommendedPage(prev => Math.max(1, prev - 1));
+                          document.getElementById("recommended-section-info")?.scrollIntoView({ behavior: "smooth" });
+                        }}
+                        disabled={recommendedPage === 1}
+                        className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors border border-white/10 flex items-center"
+                      >
+                        <ChevronLeft className="w-4 h-4 mr-1" /> Prev
+                      </button>
+                      <span className="text-[#A0A0A0] font-medium text-sm">
+                        Page {recommendedPage} of {maxRecommendedPage}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setRecommendedPage(prev => Math.min(maxRecommendedPage, prev + 1));
+                          document.getElementById("recommended-section-info")?.scrollIntoView({ behavior: "smooth" });
+                        }}
+                        disabled={recommendedPage === maxRecommendedPage}
+                        className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors border border-white/10 flex items-center"
+                      >
+                        Next <ChevronRight className="w-4 h-4 ml-1" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
           </div>
@@ -2096,15 +2131,14 @@ export default function App() {
             )}
 
             {/* Recommendations Dropdown Match */}
-            {animeInfo &&
-              animeInfo.recommended &&
-              animeInfo.recommended.length > 0 && (
-                <div className="mb-12">
+            {view === "watch" &&
+              paginatedRecommended.length > 0 && (
+                <div id="recommended-section-watch" className="mb-12">
                   <h2 className="text-xl font-bold text-white mb-6 border-l-4 border-[#FF3E3E] pl-3">
                     Recommended For You
                   </h2>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
-                    {animeInfo.recommended.map((anime) => (
+                    {paginatedRecommended.map((anime) => (
                       <button
                         key={anime.id}
                         onClick={() => {
@@ -2150,6 +2184,33 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                  {maxRecommendedPage > 1 && (
+                    <div className="py-8 flex items-center justify-center gap-4 mt-4">
+                      <button
+                        onClick={() => {
+                          setRecommendedPage(prev => Math.max(1, prev - 1));
+                          document.getElementById("recommended-section-watch")?.scrollIntoView({ behavior: "smooth" });
+                        }}
+                        disabled={recommendedPage === 1}
+                        className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors border border-white/10 flex items-center"
+                      >
+                        <ChevronLeft className="w-4 h-4 mr-1" /> Prev
+                      </button>
+                      <span className="text-[#A0A0A0] font-medium text-sm">
+                        Page {recommendedPage} of {maxRecommendedPage}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setRecommendedPage(prev => Math.min(maxRecommendedPage, prev + 1));
+                          document.getElementById("recommended-section-watch")?.scrollIntoView({ behavior: "smooth" });
+                        }}
+                        disabled={recommendedPage === maxRecommendedPage}
+                        className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors border border-white/10 flex items-center"
+                      >
+                        Next <ChevronRight className="w-4 h-4 ml-1" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
           </div>
