@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import * as cheerio from "cheerio";
 import path from "path";
+import axios from "axios";
 
 const app = express();
 const PORT = 3000;
@@ -312,16 +313,11 @@ app.get('/api/proxy', async (req, res) => {
             headers['Range'] = req.headers.range;
         }
 
-        const proxyRes = await fetch(queryUrl, { headers });
-        
-        if (!proxyRes.ok) {
-            return res.status(proxyRes.status).send('Fetch failed');
-        }
-
         if (queryUrl.includes('.m3u8')) {
-            let text = await proxyRes.text();
+            const proxyRes = await axios.get(queryUrl, { headers, responseType: 'text' });
+            let text = proxyRes.data;
             const absoluteUrlBase = new URL(queryUrl).href.replace(/\/[^\/]*$/, '/');
-            const rewritten = text.replace(/^(?!#)(.+)$/gm, (match) => {
+            const rewritten = text.replace(/^(?!#)(.+)$/gm, (match: string) => {
                 if (!match.trim()) return match;
                 if (match.startsWith('http')) return `/api/proxy?url=${encodeURIComponent(match)}`;
                 return `/api/proxy?url=${encodeURIComponent(absoluteUrlBase + match)}`;
@@ -331,16 +327,32 @@ app.get('/api/proxy', async (req, res) => {
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.send(rewritten);
         } else {
-            // Proxy raw .ts chunks and .vtt subtitles directly
-            proxyRes.headers.forEach((value, key) => {
-                res.setHeader(key, value);
-            });
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            res.status(proxyRes.status);
-            
-            const arrayBuffer = await proxyRes.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            res.send(buffer);
+            // Stream raw .ts chunks and .vtt subtitles directly using axios
+            try {
+                const proxyStreamRes = await axios({
+                    method: 'get',
+                    url: queryUrl,
+                    responseType: 'stream',
+                    headers: headers,
+                    decompress: false, // Maintain native compression
+                    validateStatus: () => true // Handle errors manually
+                });
+
+                res.status(proxyStreamRes.status);
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                
+                const ignoreHeaders = ['connection', 'transfer-encoding', 'host', 'keep-alive'];
+                for (const [key, value] of Object.entries(proxyStreamRes.headers)) {
+                    if (!ignoreHeaders.includes(key.toLowerCase()) && value) {
+                        res.setHeader(key, value as string);
+                    }
+                }
+                
+                proxyStreamRes.data.pipe(res);
+            } catch (streamErr) {
+                console.error("Axios stream proxy error", streamErr);
+                if (!res.headersSent) res.status(500).send("Proxy stream error");
+            }
         }
     } catch (error) {
         console.error("Proxy error", error);

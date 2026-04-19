@@ -20,6 +20,14 @@ import {
   Check,
   Calendar,
   ServerCrash,
+  Maximize,
+  Minimize,
+  Volume2,
+  VolumeX,
+  Pause,
+  Settings,
+  RotateCcw,
+  RotateCw
 } from "lucide-react";
 import type {
   AnimeResult,
@@ -45,11 +53,30 @@ const HlsPlayer = ({
   proxyNeeded?: boolean;
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [showControls, setShowControls] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [qualities, setQualities] = useState<any[]>([]);
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [playerError, setPlayerError] = useState<string | null>(null);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Initialize HLS and Tracks
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
+    setPlayerError(null);
     let hls: Hls;
     const finalSrc = proxyNeeded ? `/api/proxy?url=${encodeURIComponent(src)}` : src;
 
@@ -57,18 +84,71 @@ const HlsPlayer = ({
       hls = new Hls();
       hls.loadSource(finalSrc);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
         video.play().catch(() => {});
+        setIsPlaying(!video.paused);
+        setQualities(data.levels || []);
+      });
+
+      hls.on(Hls.Events.ERROR, (event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR) {
+                 setPlayerError("Failed to load the video stream. The server might be blocking the request or is currently down.");
+              } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
+                 setPlayerError("A network error occurred while fetching video segments. The connection timed out.");
+              } else {
+                 setPlayerError("A fatal network error occurred. Please check your connection.");
+              }
+              hls.destroy();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              setPlayerError("A fatal media error occurred while decoding the video sequence. Try switching to a different server.");
+              hls.destroy();
+              break;
+            default:
+              setPlayerError("An unrecoverable playback error occurred. Please try a different server entirely.");
+              hls.destroy();
+              break;
+          }
+        }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = finalSrc;
       video.addEventListener("loadedmetadata", () => {
         video.play().catch(() => {});
+        setIsPlaying(!video.paused);
       });
+      
+      const onNativeVideoError = () => {
+         const error = video.error;
+         if (!error) return;
+         switch (error.code) {
+            case error.MEDIA_ERR_ABORTED:
+               setPlayerError("Video playback was aborted by the user.");
+               break;
+            case error.MEDIA_ERR_NETWORK:
+               setPlayerError("A network error caused the video download to fail part-way. Server might be unresponsive.");
+               break;
+            case error.MEDIA_ERR_DECODE:
+               setPlayerError("The video playback was aborted due to a corruption problem or because it used features your browser did not support.");
+               break;
+            case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+               setPlayerError("The video could not be loaded, either because the server or network failed or because the format is not supported.");
+               break;
+            default:
+               setPlayerError("An unknown native video error occurred.");
+               break;
+         }
+      };
+      
+      video.addEventListener("error", onNativeVideoError);
     }
 
     return () => {
       if (hls) hls.destroy();
+      video.removeEventListener("error", () => {});
     };
   }, [src]);
 
@@ -93,8 +173,6 @@ const HlsPlayer = ({
     };
 
     video.addEventListener("loadeddata", enableSubtitles);
-
-    // Attempt applying it immediately if tracks are already available
     const timeout = setTimeout(enableSubtitles, 500);
 
     return () => {
@@ -103,34 +181,457 @@ const HlsPlayer = ({
     };
   }, [tracks]);
 
+  // Video State Trackers
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onTimeUpdate = () => setCurrentTime(video.currentTime);
+    const onDurationChange = () => setDuration(video.duration);
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+
+    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("durationchange", onDurationChange);
+    video.addEventListener("play", onPlay);
+    video.addEventListener("pause", onPause);
+
+    return () => {
+      video.removeEventListener("timeupdate", onTimeUpdate);
+      video.removeEventListener("durationchange", onDurationChange);
+      video.removeEventListener("play", onPlay);
+      video.removeEventListener("pause", onPause);
+    };
+  }, []);
+
+  // UI Event Handlers
+  const handleMouseMove = () => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => {
+      if (isPlaying) setShowControls(false);
+      setShowSettings(false);
+    }, 3000);
+  };
+
+  const handleMouseLeave = () => {
+    if (isPlaying) setShowControls(false);
+    setShowSettings(false);
+  };
+
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (videoRef.current.paused) {
+      videoRef.current.play();
+    } else {
+      videoRef.current.pause();
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value);
+    if (videoRef.current) videoRef.current.currentTime = time;
+    setCurrentTime(time);
+  };
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVolume = parseFloat(e.target.value);
+    if (videoRef.current) videoRef.current.volume = newVolume;
+    setVolume(newVolume);
+    setIsMuted(newVolume === 0);
+  };
+
+  const toggleMute = () => {
+    if (!videoRef.current) return;
+    const newMuted = !isMuted;
+    videoRef.current.muted = newMuted;
+    setIsMuted(newMuted);
+    if (!newMuted && volume === 0) {
+      setVolume(1);
+      videoRef.current.volume = 1;
+    }
+  };
+
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().catch((err) => console.error(err));
+    } else {
+      document.exitFullscreen().catch((err) => console.error(err));
+    }
+  };
+
+  const setSpeed = (speed: number) => {
+    if (videoRef.current) videoRef.current.playbackRate = speed;
+    setPlaybackRate(speed);
+    setShowSettings(false);
+  };
+
+  const handleClientDownload = async (level: any) => {
+    try {
+      setIsDownloading(true);
+      setDownloadProgress(0);
+      setShowDownloadMenu(false);
+
+      let playlistUrl = level.url ? (Array.isArray(level.url) ? level.url[0] : level.url) : null;
+      if (!playlistUrl && level.attrs && level.attrs.URI) {
+         playlistUrl = level.attrs.URI;
+         if (!playlistUrl.startsWith('http')) {
+             const base = new URL(src).href.replace(/\/[^\/]*$/, '/');
+             playlistUrl = base + playlistUrl;
+         }
+      }
+      
+      if (!playlistUrl) {
+         throw new Error("Could not extract quality URL.");
+      }
+
+      const finalPlaylistUrl = proxyNeeded ? `/api/proxy?url=${encodeURIComponent(playlistUrl)}` : playlistUrl;
+      const res = await fetch(finalPlaylistUrl);
+      const text = await res.text();
+
+      const lines = text.split('\n');
+      const tsUrls: string[] = [];
+      const absoluteBase = new URL(playlistUrl).href.replace(/\/[^\/]*$/, '/');
+
+      for (const line of lines) {
+        if (line.trim() && !line.startsWith('#')) {
+          let url = line.trim();
+          if (!url.startsWith('http')) {
+            url = absoluteBase + url;
+          }
+          tsUrls.push(url);
+        }
+      }
+
+      if (tsUrls.length === 0) throw new Error("No video segments found.");
+
+      const buffers: ArrayBuffer[] = [];
+      let loaded = 0;
+      
+      const batchSize = 3;
+      for (let i = 0; i < tsUrls.length; i += batchSize) {
+         const batch = tsUrls.slice(i, i + batchSize);
+         const batchPromises = batch.map(async (url) => {
+            const fetchUrl = proxyNeeded ? `/api/proxy?url=${encodeURIComponent(url)}` : url;
+            const segRes = await fetch(fetchUrl);
+            if (!segRes.ok) throw new Error(`Failed to fetch segment ${url}`);
+            return await segRes.arrayBuffer();
+         });
+         
+         const batchBuffers = await Promise.all(batchPromises);
+         buffers.push(...batchBuffers);
+         
+         loaded += batch.length;
+         setDownloadProgress(Math.floor((loaded / tsUrls.length) * 100));
+      }
+
+      setDownloadProgress(100);
+      const blob = new Blob(buffers, { type: 'video/mp2t' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `Episode_${level.height || 'Video'}p.ts`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+      
+      setTimeout(() => {
+        setIsDownloading(false);
+        setDownloadProgress(0);
+      }, 2000);
+    } catch (e: any) {
+      console.error(e);
+      alert("Download error: " + e.message + "\n\nPlease try the external download button below the player.");
+      setIsDownloading(false);
+      setDownloadProgress(0);
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const formatTime = (seconds: number) => {
+    if (isNaN(seconds)) return "00:00";
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  };
+
+  const skipBackward = () => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 15);
+    }
+  };
+
+  const skipForward = () => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = Math.min(duration || videoRef.current.duration, videoRef.current.currentTime + 15);
+    }
+  };
+
   return (
-    <video
-      ref={videoRef}
-      onEnded={onEnded}
-      className="w-full h-full border-0 relative z-10"
-      controls
-      autoPlay
-      playsInline
-      crossOrigin="anonymous"
+    <div
+      ref={containerRef}
+      className="relative w-full h-full bg-black group overflow-hidden focus:outline-none"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === ' ') {
+            e.preventDefault();
+            togglePlay();
+        } else if (e.key === 'f') {
+            toggleFullscreen();
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            skipBackward();
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            skipForward();
+        }
+      }}
     >
-      {tracks.map((track, i) => (
-        <track
-          key={i}
-          kind={track.kind || "captions"}
-          src={
-            track.file?.startsWith("http")
-              ? `/api/proxy?url=${encodeURIComponent(track.file)}`
-              : track.file
-          }
-          srcLang={track.label?.toLowerCase().substring(0, 2) || "en"}
-          label={track.label}
-          default={
-            track.default ||
-            (track.label && track.label.toLowerCase().includes("english"))
-          }
-        />
-      ))}
-    </video>
+      {/* Video Element */}
+      <video
+        ref={videoRef}
+        onEnded={onEnded}
+        onClick={togglePlay}
+        className="w-full h-full object-contain cursor-pointer"
+        autoPlay
+        playsInline
+        crossOrigin="anonymous"
+      >
+        {tracks.map((track, i) => (
+          <track
+            key={i}
+            kind={track.kind || "captions"}
+            src={
+              track.file?.startsWith("http")
+                ? `/api/proxy?url=${encodeURIComponent(track.file)}`
+                : track.file
+            }
+            srcLang={track.label?.toLowerCase().substring(0, 2) || "en"}
+            label={track.label}
+            default={
+              track.default ||
+              (track.label && track.label.toLowerCase().includes("english"))
+            }
+          />
+        ))}
+      </video>
+
+      {/* Downloading Overlay */}
+      {isDownloading && (
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
+           <Download className="w-12 h-12 text-[#FF3E3E] mb-4 animate-bounce" />
+           <h3 className="text-xl font-bold text-white mb-2">Downloading Video</h3>
+           <p className="text-[#A0A0A0] text-sm max-w-sm mb-6">Please keep this page open while the video chunks are being securely assembled.</p>
+           
+           <div className="w-full max-w-md bg-white/10 rounded-full h-3 mb-2 overflow-hidden border border-white/5 shadow-inner">
+             <div 
+               className="bg-[#FF3E3E] h-full rounded-full transition-all duration-300 relative overflow-hidden"
+               style={{ width: `${downloadProgress}%` }}
+             >
+                <div className="absolute inset-0 bg-white/20 w-full h-full animate-[shimmer_2s_infinite] -skew-x-12" style={{backgroundImage: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)'}} />
+             </div>
+           </div>
+           <div className="text-white font-mono font-bold text-lg">{downloadProgress}%</div>
+        </div>
+      )}
+
+      {/* Error Overlay */}
+      {playerError && (
+        <div className="absolute inset-0 bg-black/90 backdrop-blur-sm z-[60] flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
+          <AlertCircle className="w-12 h-12 text-[#FF3E3E] mb-4 shadow-sm" />
+          <h3 className="text-xl font-bold text-white mb-2">Playback Error</h3>
+          <p className="text-[#A0A0A0] text-sm max-w-md mb-6">{playerError}</p>
+          <div className="flex gap-3">
+             <button onClick={() => window.location.reload()} className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-sm font-medium transition-colors border border-white/10 shadow-lg cursor-pointer pointer-events-auto">
+               Refresh Page
+             </button>
+          </div>
+          <p className="text-xs text-[#666] mt-6 max-w-sm">If refreshing doesn't work, try selecting a different server from the list below the player.</p>
+        </div>
+      )}
+
+      {/* Custom Controls */}
+      <div
+        className={`absolute inset-0 pointer-events-none flex flex-col justify-end transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}
+      >
+        <div className="bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-32 pb-4 px-4 sm:px-6 flex flex-col gap-3 pointer-events-auto">
+          {/* Progress Bar */}
+          <div className="flex items-center gap-3 w-full group/seek">
+            <span className="text-white text-xs font-medium font-mono min-w-[40px] text-right">
+              {formatTime(currentTime)}
+            </span>
+            <div className="relative flex-1 h-3 flex items-center cursor-pointer">
+              <input
+                type="range"
+                min="0"
+                max={duration || 100}
+                value={currentTime}
+                onChange={handleSeek}
+                className="absolute w-full h-[3px] bg-white/20 rounded-full appearance-none outline-none cursor-pointer z-20"
+                style={{
+                  background: `linear-gradient(to right, #FF3E3E ${(currentTime / (duration || 1)) * 100}%, rgba(255,255,255,0.2) ${(currentTime / (duration || 1)) * 100}%)`,
+                }}
+              />
+              <style dangerouslySetInnerHTML={{__html: `
+                input[type=range]::-webkit-slider-thumb {
+                  -webkit-appearance: none;
+                  appearance: none;
+                  width: 12px;
+                  height: 12px;
+                  border-radius: 50%;
+                  background: #FF3E3E;
+                  cursor: pointer;
+                  transition: transform 0.1s;
+                }
+                input[type=range]::-webkit-slider-thumb:hover {
+                  transform: scale(1.3);
+                }
+                input[type=range]::-moz-range-thumb {
+                  width: 12px;
+                  height: 12px;
+                  border-radius: 50%;
+                  background: #FF3E3E;
+                  cursor: pointer;
+                  border: none;
+                  transition: transform 0.1s;
+                }
+                input[type=range]::-moz-range-thumb:hover {
+                  transform: scale(1.3);
+                }
+              `}} />
+            </div>
+            <span className="text-white/70 text-xs font-medium font-mono min-w-[40px]">
+              {formatTime(duration)}
+            </span>
+          </div>
+
+          {/* Bottom Controls Row */}
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-1 sm:gap-3">
+              <button
+                onClick={skipBackward}
+                className="text-white hover:text-[#FF3E3E] transition-colors p-2"
+                title="Backward 15s"
+              >
+                <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+
+              <button
+                onClick={togglePlay}
+                className="text-white hover:text-[#FF3E3E] transition-colors p-2"
+              >
+                {isPlaying ? <Pause className="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" /> : <Play className="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" />}
+              </button>
+
+              <button
+                onClick={skipForward}
+                className="text-white hover:text-[#FF3E3E] transition-colors p-2"
+                title="Forward 15s"
+              >
+                <RotateCw className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+
+              <div className="flex items-center gap-2 group/volume relative hidden sm:flex ml-1">
+                <button
+                  onClick={toggleMute}
+                  className="text-white hover:text-[#FF3E3E] transition-colors p-2"
+                >
+                  {isMuted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                </button>
+                <div className="w-0 overflow-hidden group-hover/volume:w-24 transition-all duration-300 flex items-center pr-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={isMuted ? 0 : volume}
+                    onChange={handleVolumeChange}
+                    className="w-full h-1 bg-white/20 rounded-full appearance-none outline-none cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, white ${(isMuted ? 0 : volume) * 100}%, rgba(255,255,255,0.2) ${(isMuted ? 0 : volume) * 100}%)`,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="relative">
+                <button
+                  title="Download Video"
+                  onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+                  className="text-white hover:text-[#FF3E3E] transition-colors p-2"
+                >
+                  <Download className="w-5 h-5" />
+                </button>
+                {showDownloadMenu && qualities.length > 0 && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-[#121212]/95 backdrop-blur-sm border border-white/10 rounded-xl overflow-hidden min-w-[120px] shadow-2xl origin-bottom-right animate-in fade-in slide-in-from-bottom-2 z-50">
+                    <div className="px-4 py-2 text-xs font-bold text-white/50 uppercase tracking-wider border-b border-white/5 bg-[#0a0a0a]">
+                      Download Quality
+                    </div>
+                    {qualities.map((level, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleClientDownload(level)}
+                        className="block w-full text-left px-4 py-2 text-sm hover:bg-white/10 transition-colors text-white whitespace-nowrap"
+                      >
+                        {level.height ? `${level.height}p` : `Option ${i + 1}`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {showDownloadMenu && qualities.length === 0 && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-[#121212]/95 backdrop-blur-sm border border-white/10 rounded-xl overflow-hidden min-w-[150px] shadow-2xl origin-bottom-right animate-in fade-in slide-in-from-bottom-2 z-50 p-4 text-center">
+                    <p className="text-sm text-white font-medium mb-1">Qualities not parsed.</p>
+                    <p className="text-xs text-[#A0A0A0]">Please use the external download button below the player.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="relative">
+                <button
+                  onClick={() => setShowSettings(!showSettings)}
+                  className="text-white hover:text-[#FF3E3E] transition-colors p-2 flex items-center gap-1 font-medium text-xs sm:text-sm bg-white/5 hover:bg-white/10 rounded-md px-3"
+                >
+                  {playbackRate}x
+                </button>
+                {showSettings && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-[#121212]/95 backdrop-blur-sm border border-white/10 rounded-xl overflow-hidden min-w-[100px] shadow-2xl origin-bottom-right animate-in fade-in slide-in-from-bottom-2">
+                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                      <button
+                        key={speed}
+                        onClick={() => setSpeed(speed)}
+                        className={`block w-full text-left px-4 py-2 text-sm hover:bg-white/10 transition-colors ${playbackRate === speed ? "text-[#FF3E3E] font-medium" : "text-white"}`}
+                      >
+                        {speed === 1 ? "Normal" : `${speed}x`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={toggleFullscreen}
+                className="text-white hover:text-[#FF3E3E] transition-colors p-2 ml-1"
+              >
+                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -161,13 +662,6 @@ export default function App() {
       currentObserver.current = new IntersectionObserver(
         (entries) => {
           if (
-            entries[0].isIntersecting &&
-            hasMoreRecent &&
-            view === "search" &&
-            !query
-          ) {
-            fetchRecent(recentPage + 1);
-          } else if (
              entries[0].isIntersecting &&
              hasMoreAz &&
              view === "az"
@@ -228,20 +722,20 @@ export default function App() {
   };
 
   const fetchRecent = async (page: number) => {
-    if (recentLoading || !hasMoreRecent) return;
+    if (recentLoading) return;
     setRecentLoading(true);
     try {
       const res = await fetch(`/api/recent?page=${page}`);
       if (res.ok) {
         const data = await res.json();
         if (data.results && data.results.length > 0) {
-          setRecentUpdates((prev) =>
-            page === 1 ? data.results : [...prev, ...data.results],
-          );
+          setRecentUpdates(data.results);
           if (page === 1 && data.trending) setTrending(data.trending);
           setRecentPage(page);
+          setHasMoreRecent(true);
         } else {
           setHasMoreRecent(false);
+          if (page === 1) setRecentUpdates([]);
         }
       } else {
         setHasMoreRecent(false);
@@ -810,14 +1304,37 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                {recentUpdates.length > 0 && hasMoreRecent && (
-                  <div
-                    ref={observerRef}
-                    className="py-8 flex justify-center mt-4"
-                  >
-                    {recentLoading && (
-                      <Loader2 className="w-8 h-8 text-[#FF3E3E] animate-spin" />
-                    )}
+                {recentUpdates.length > 0 && (
+                  <div className="py-8 flex items-center justify-center gap-4 mt-4">
+                    <button
+                      onClick={() => {
+                        fetchRecent(recentPage - 1);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      disabled={recentPage === 1 || recentLoading}
+                      className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors border border-white/10 flex items-center"
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" /> Prev
+                    </button>
+                    <span className="text-[#A0A0A0] font-medium text-sm">
+                      Page {recentPage}
+                    </span>
+                    <button
+                      onClick={() => {
+                        fetchRecent(recentPage + 1);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      disabled={!hasMoreRecent || recentLoading}
+                      className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors border border-white/10 flex items-center"
+                    >
+                      {recentLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          Next <ChevronRight className="w-4 h-4 ml-1" />
+                        </>
+                      )}
+                    </button>
                   </div>
                 )}
               </div>
@@ -1074,15 +1591,6 @@ export default function App() {
                       Download
                     </button>
                   )}
-                  <a
-                    href={externalWatchUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 bg-[#FF3E3E]/10 hover:bg-[#FF3E3E]/20 text-[#FF3E3E] rounded-md transition-colors border border-[#FF3E3E]/20"
-                    title="Open on the official site"
-                  >
-                    Open Source
-                  </a>
                 </div>
               </div>
 
