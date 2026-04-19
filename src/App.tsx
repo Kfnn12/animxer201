@@ -1087,12 +1087,12 @@ export default function App() {
           </div>
 
           <a 
-            href="/animxer.apk" 
-            download="animxer.apk"
-            className="hidden sm:flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm font-medium transition-colors"
+            href="/Animxer.apk" 
+            download="Animxer.apk"
+            className="hidden sm:flex items-center gap-2 px-4 py-2 bg-[#FF3E3E] hover:bg-[#ff5555] text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-[#FF3E3E]/20"
           >
-            <Download className="w-4 h-4 text-[#FF3E3E]" />
-            <span className="text-white">Get App</span>
+            <Download className="w-4 h-4" />
+            <span>Download APK</span>
           </a>
         </div>
       </header>
@@ -2424,12 +2424,12 @@ export default function App() {
                   Close
                 </button>
                 <a
-                  href={`intent://9xbuddy.com/process?url=${encodeURIComponent(sourceLink)}#Intent;scheme=https;package=com.android.chrome;end`}
+                  href={`https://9xbuddy.com/process?url=${encodeURIComponent(sourceLink)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-5 py-2.5 text-sm font-bold bg-[#FF3E3E] hover:bg-[#ff5555] text-white rounded-xl shadow-lg shadow-[#FF3E3E]/20 transition-all hover:scale-105"
                 >
-                  App Download Link
+                  Download using 9xbuddy
                 </a>
               </div>
             </motion.div>
