@@ -37,10 +37,12 @@ const HlsPlayer = ({
   src,
   tracks = [],
   onEnded,
+  proxyNeeded = false,
 }: {
   src: string;
   tracks?: any[];
   onEnded?: () => void;
+  proxyNeeded?: boolean;
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -49,16 +51,17 @@ const HlsPlayer = ({
     if (!video) return;
 
     let hls: Hls;
+    const finalSrc = proxyNeeded ? `/api/proxy?url=${encodeURIComponent(src)}` : src;
 
     if (Hls.isSupported()) {
       hls = new Hls();
-      hls.loadSource(src);
+      hls.loadSource(finalSrc);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {});
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = src;
+      video.src = finalSrc;
       video.addEventListener("loadedmetadata", () => {
         video.play().catch(() => {});
       });
@@ -132,7 +135,7 @@ const HlsPlayer = ({
 };
 
 export default function App() {
-  const [view, setView] = useState<"search" | "info" | "watch">("search");
+  const [view, setView] = useState<"search" | "info" | "watch" | "az">("search");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<AnimeResult[]>([]);
@@ -142,6 +145,12 @@ export default function App() {
   const [recentPage, setRecentPage] = useState(1);
   const [recentLoading, setRecentLoading] = useState(false);
   const [hasMoreRecent, setHasMoreRecent] = useState(true);
+
+  const [azResults, setAzResults] = useState<AnimeResult[]>([]);
+  const [azLoading, setAzLoading] = useState(false);
+  const [azPage, setAzPage] = useState(1);
+  const [hasMoreAz, setHasMoreAz] = useState(true);
+  const [selectedLetter, setSelectedLetter] = useState<string>("A");
 
   const currentObserver = useRef<IntersectionObserver | null>(null);
   const observerRef = React.useCallback(
@@ -158,6 +167,12 @@ export default function App() {
             !query
           ) {
             fetchRecent(recentPage + 1);
+          } else if (
+             entries[0].isIntersecting &&
+             hasMoreAz &&
+             view === "az"
+          ) {
+             fetchAzList(selectedLetter, azPage + 1);
           }
         },
         { threshold: 0.1 },
@@ -174,6 +189,43 @@ export default function App() {
   const [animeInfo, setAnimeInfo] = useState<AnimeInfo | null>(null);
 
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+
+  const fetchAzList = async (char: string, page: number) => {
+    if (azLoading || (page > 1 && !hasMoreAz)) return;
+    setAzLoading(true);
+    try {
+      const res = await fetch(`/api/az?char=${char}&page=${page}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          setAzResults((prev) =>
+            page === 1 ? data.results : [...prev, ...data.results],
+          );
+          setAzPage(page);
+          if (data.results.length < 30) {
+            setHasMoreAz(false);
+          }
+        } else {
+          setHasMoreAz(false);
+          if (page === 1) setAzResults([]);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setAzLoading(false);
+  };
+
+  const handleLetterSelect = (char: string) => {
+     setSelectedLetter(char);
+     setAzResults([]);
+     setAzPage(1);
+     setHasMoreAz(true);
+     setQuery("");
+     setView("az");
+     fetchAzList(char, 1);
+     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const fetchRecent = async (page: number) => {
     if (recentLoading || !hasMoreRecent) return;
@@ -251,13 +303,16 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (selectedEpisodeRef.current && view === "watch") {
-      selectedEpisodeRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
+    if (selectedEpisodeRef.current && (view === "watch" || view === "info")) {
+      // Small timeout ensures the DOM has laid out the newly rendered episode list
+      setTimeout(() => {
+        selectedEpisodeRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      }, 50);
     }
-  }, [selectedEpisode?.id, view]);
+  }, [selectedEpisode?.id, view, animeInfo?.episodes]);
 
   useEffect(() => {
     fetch("/api/schedule")
@@ -892,10 +947,27 @@ export default function App() {
                       {animeInfo.episodes.map((ep) => (
                         <button
                           key={ep.id}
-                          onClick={() => watchEpisode(ep)}
-                          className="bg-[#121212] hover:bg-[#FF3E3E]/10 border border-white/10 hover:border-[#FF3E3E]/50 rounded-xl p-3 flex flex-col items-center gap-2 transition-all group outline-none focus-visible:ring-2 focus-visible:ring-[#FF3E3E]"
+                          ref={(el) => {
+                            if (el && selectedEpisode?.id === ep.id) {
+                              (
+                                selectedEpisodeRef as React.MutableRefObject<HTMLButtonElement | null>
+                              ).current = el;
+                            }
+                          }}
+                          onClick={() => {
+                            if (selectedEpisode?.id !== ep.id || view === "info") {
+                              watchEpisode(ep);
+                            }
+                          }}
+                          className={`border rounded-xl p-3 flex flex-col items-center gap-2 transition-all group outline-none focus-visible:ring-2 focus-visible:ring-[#FF3E3E] ${
+                            selectedEpisode?.id === ep.id
+                              ? "bg-[#FF3E3E] border-[#FF3E3E] shadow-[0_0_15px_rgba(255,62,62,0.5)] text-white scale-[1.03] z-10"
+                              : "bg-[#121212] hover:bg-[#FF3E3E]/10 border-white/10 hover:border-[#FF3E3E]/50 text-[#A0A0A0]"
+                          }`}
                         >
-                          <span className="text-xs text-[#A0A0A0] group-hover:text-[#FF3E3E] transition-colors">
+                          <span
+                            className={`text-xs transition-colors ${selectedEpisode?.id === ep.id ? "text-white font-bold" : "group-hover:text-[#FF3E3E]"}`}
+                          >
                             Episode {ep.number}
                           </span>
                         </button>
@@ -1069,11 +1141,12 @@ export default function App() {
                     </div>
                   </div>
                 ) : sourceLink ? (
-                  proxyNeeded ? (
+                  sourceLink.includes('.m3u8') || proxyNeeded ? (
                     <HlsPlayer
-                      src={`/api/proxy?url=${encodeURIComponent(sourceLink)}`}
+                      src={sourceLink}
                       tracks={sourceTracks}
                       onEnded={handleVideoEnded}
+                      proxyNeeded={proxyNeeded}
                     />
                   ) : (
                     <>
@@ -1431,7 +1504,130 @@ export default function App() {
               )}
           </div>
         )}
+        {view === "az" && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+             <div className="flex items-center gap-3 mb-8">
+                <button
+                  onClick={() => {
+                    setView("search");
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors text-white"
+                >
+                  <ArrowLeft className="w-6 h-6" />
+                </button>
+                <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+                   A-Z List: <span className="text-[#FF3E3E] uppercase">{selectedLetter === "Other" ? "#" : selectedLetter}</span>
+                </h1>
+             </div>
+
+             {azResults.length > 0 ? (
+               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 gap-y-8 mb-8">
+                  {azResults.map((anime) => (
+                    <div
+                      key={anime.id}
+                      onClick={() => getInfo(anime)}
+                      className="group cursor-pointer flex flex-col gap-3 outline-none"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => e.key === "Enter" && getInfo(anime)}
+                    >
+                      <div className="relative aspect-[2/3] overflow-hidden rounded-xl bg-[#121212] shadow-md ring-1 ring-white/10 group-hover:ring-[#FF3E3E]/50 transition-all duration-300">
+                        <img
+                          src={anime.poster}
+                          alt={anime.title}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/0 to-black/0 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4">
+                          <div className="w-10 h-10 rounded-full bg-[#FF3E3E] text-white flex items-center justify-center transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+                            <Play className="w-5 h-5 ml-1" />
+                          </div>
+                        </div>
+                        <div className="absolute top-2 left-2 flex flex-col gap-1.5">
+                          {anime.sub && anime.sub !== "0" && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-white/90 text-black backdrop-blur-sm shadow-sm flex items-center">
+                              SUB {anime.sub}
+                            </span>
+                          )}
+                          {anime.dub && anime.dub !== "0" && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[#FF3E3E]/90 text-white backdrop-blur-sm shadow-sm flex items-center">
+                              DUB {anime.dub}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-sm text-white line-clamp-2 leading-snug group-hover:text-[#FF3E3E] transition-colors">
+                          {anime.title}
+                        </h3>
+                        <p className="text-xs text-[#A0A0A0] mt-1.5 flex items-center gap-2">
+                          <span>{anime.type}</span>
+                          <span className="w-1 h-1 rounded-full bg-white/20"></span>
+                          <span>{anime.duration}</span>
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+               </div>
+             ) : azLoading ? null : (
+               <div className="text-center py-20 text-[#A0A0A0]">
+                 No results found for this letter.
+               </div>
+             )}
+
+             {azLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-8 h-8 text-[#FF3E3E] animate-spin" />
+                </div>
+             )}
+             {!hasMoreAz && azResults.length > 0 && (
+                <div className="text-center py-8 text-[#A0A0A0] text-sm font-medium">
+                  You've reached the end of the list.
+                </div>
+             )}
+             
+             {/* Infinite scroll marker */}
+             {hasMoreAz && !azLoading && azResults.length > 0 && (
+               <div ref={observerRef} className="h-10 w-full" />
+             )}
+          </div>
+        )}
       </main>
+
+      <footer className="mt-auto border-t border-white/5 bg-[#0a0a0a] pt-10 pb-8 px-4 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] relative z-10 w-full">
+        <div className="max-w-4xl mx-auto flex flex-col items-center">
+          <h2 className="text-sm font-semibold text-white/50 uppercase tracking-widest mb-6 flex items-center justify-center text-center">
+             A-Z Anime List
+          </h2>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button 
+              onClick={() => handleLetterSelect("All")} 
+              className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${selectedLetter === "All" ? "bg-[#FF3E3E] text-white shadow-lg shadow-[#FF3E3E]/20" : "bg-white/5 text-[#A0A0A0] hover:bg-white/10 hover:text-white border border-white/5"}`}
+            >
+              All
+            </button>
+            <button 
+              onClick={() => handleLetterSelect("Other")} 
+              className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${selectedLetter === "Other" ? "bg-[#FF3E3E] text-white shadow-lg shadow-[#FF3E3E]/20" : "bg-white/5 text-[#A0A0A0] hover:bg-white/10 hover:text-white border border-white/5"}`}
+            >
+              #
+            </button>
+            {["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"].map(char => (
+               <button 
+                 key={char} 
+                 onClick={() => handleLetterSelect(char)}
+                 className={`w-9 h-9 flex items-center justify-center rounded-lg text-sm font-bold transition-all ${selectedLetter === char ? "bg-[#FF3E3E] text-white shadow-lg shadow-[#FF3E3E]/20 scale-110" : "bg-white/5 text-[#A0A0A0] hover:bg-white/10 hover:text-white hover:scale-105 border border-white/5"}`}
+               >
+                 {char}
+               </button>
+            ))}
+          </div>
+          <p className="text-xs text-[#A0A0A0]/50 mt-10 text-center uppercase tracking-wider font-medium">
+             © {new Date().getFullYear()} ANIMXER
+          </p>
+        </div>
+      </footer>
 
       <style
         dangerouslySetInnerHTML={{

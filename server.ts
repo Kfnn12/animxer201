@@ -101,6 +101,47 @@ app.get("/api/recent", async (req, res) => {
   }
 });
 
+app.get("/api/az", async (req, res) => {
+  try {
+    const char = req.query.char as string || "A";
+    const page = parseInt(req.query.page as string) || 1;
+    const isOther = char === "Other";
+    
+    // Kaido handles A-Z via /az-list/A or /az-list/other (all non alphabet chars usually go under 'other' or something similar, wait let's just use char literally if not 'All')
+    // Wait, kaido az-list path: usually /az-list/[A-Z]
+    // Aniwatch has /az-list/other for non-alpha. Let's just pass `char` mapped to lowercase/uppercase as provided
+    let path = char === "All" ? "/az-list" : `/az-list/${char}`;
+    if (page > 1) {
+      path += `?page=${page}`;
+    }
+
+    const htmlRes = await fetchKaido(path);
+    const html = await htmlRes.text();
+    const $ = cheerio.load(html);
+
+    const results: any[] = [];
+    $(".flw-item").each((_, el) => {
+      const title = $(el).find(".dynamic-name").text().trim() || $(el).find(".film-name a").text().trim();
+      const idStr = $(el).find(".film-poster-ahref").attr("href") || $(el).find(".film-name a").attr("href") || "";
+      const id = idStr.split("?")[0].replace("/", "");
+      const poster = $(el).find(".film-poster-img").attr("data-src") || $(el).find(".film-poster-img").attr("src") || "";
+      const type = $(el).find(".fdi-item").first().text().trim();
+      const duration = $(el).find(".fdi-duration").text().trim();
+      const sub = $(el).find(".tick-sub").text().trim() || 0;
+      const dub = $(el).find(".tick-dub").text().trim() || 0;
+
+      if (id) {
+        results.push({ id, title, poster, type, duration, sub, dub });
+      }
+    });
+
+    res.json({ results });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch AZ list" });
+  }
+});
+
 app.get("/api/info", async (req, res) => {
   try {
     const id = req.query.id as string;
@@ -256,8 +297,6 @@ app.get("/api/source", async (req, res) => {
   }
 });
 
-import https from 'https';
-
 app.get('/api/proxy', async (req, res) => {
     try {
         const queryUrl = req.query.url as string;
@@ -273,12 +312,14 @@ app.get('/api/proxy', async (req, res) => {
             headers['Range'] = req.headers.range;
         }
 
+        const proxyRes = await fetch(queryUrl, { headers });
+        
+        if (!proxyRes.ok) {
+            return res.status(proxyRes.status).send('Fetch failed');
+        }
+
         if (queryUrl.includes('.m3u8')) {
-            const proxyRes = await fetch(queryUrl, { headers });
-            if (!proxyRes.ok) return res.status(proxyRes.status).send('M3U8 fetch failed');
-            
             let text = await proxyRes.text();
-            
             const absoluteUrlBase = new URL(queryUrl).href.replace(/\/[^\/]*$/, '/');
             const rewritten = text.replace(/^(?!#)(.+)$/gm, (match) => {
                 if (!match.trim()) return match;
@@ -290,24 +331,16 @@ app.get('/api/proxy', async (req, res) => {
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.send(rewritten);
         } else {
-            const parsed = new URL(queryUrl);
-            const targetReq = https.request({
-                hostname: parsed.hostname,
-                path: parsed.pathname + parsed.search,
-                method: 'GET',
-                headers: headers
-            }, (proxyRes) => {
-                res.writeHead(proxyRes.statusCode || 200, {
-                    ...proxyRes.headers,
-                    'Access-Control-Allow-Origin': '*'
-                });
-                proxyRes.pipe(res);
+            // Proxy raw .ts chunks and .vtt subtitles directly
+            proxyRes.headers.forEach((value, key) => {
+                res.setHeader(key, value);
             });
-            targetReq.end();
-            targetReq.on('error', (e) => {
-                console.error("TS Proxy error", e);
-                if (!res.headersSent) res.writeHead(500).end();
-            });
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.status(proxyRes.status);
+            
+            const arrayBuffer = await proxyRes.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            res.send(buffer);
         }
     } catch (error) {
         console.error("Proxy error", error);
