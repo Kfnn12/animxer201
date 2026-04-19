@@ -44,11 +44,13 @@ import { motion, AnimatePresence } from "motion/react";
 const HlsPlayer = ({
   src,
   tracks = [],
+  skipTimes = {},
   onEnded,
   proxyNeeded = false,
 }: {
   src: string;
   tracks?: any[];
+  skipTimes?: {intro?: {start: number, end: number}, outro?: {start: number, end: number}};
   onEnded?: () => void;
   proxyNeeded?: boolean;
 }) => {
@@ -70,6 +72,16 @@ const HlsPlayer = ({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const isSkipIntroVisible = skipTimes?.intro && currentTime >= skipTimes.intro.start && currentTime <= skipTimes.intro.end;
+  const isSkipOutroVisible = skipTimes?.outro && currentTime >= skipTimes.outro.start && currentTime <= skipTimes.outro.end;
+
+  const handleSkipTime = () => {
+    if (videoRef.current) {
+      if (isSkipIntroVisible && skipTimes.intro) videoRef.current.currentTime = skipTimes.intro.end;
+      else if (isSkipOutroVisible && skipTimes.outro) videoRef.current.currentTime = skipTimes.outro.end;
+    }
+  };
 
   // Initialize HLS and Tracks
   useEffect(() => {
@@ -489,6 +501,19 @@ const HlsPlayer = ({
         className={`absolute inset-0 pointer-events-none flex flex-col justify-end transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}
       >
         <div className="bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-32 pb-4 px-4 sm:px-6 flex flex-col gap-3 pointer-events-auto">
+          {/* Skip Buttons Overlay Context */}
+          {(isSkipIntroVisible || isSkipOutroVisible) && (
+             <div className="absolute bottom-24 right-4 sm:right-8 z-50">
+                <button
+                   onClick={handleSkipTime}
+                   className="px-5 py-2.5 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 text-white font-semibold rounded-lg shadow-2xl transition hover:scale-105 active:scale-95 flex items-center gap-2"
+                >
+                   <span>{isSkipIntroVisible ? "Skip Intro" : "Skip Outro"}</span>
+                   <RotateCw className="w-4 h-4" />
+                </button>
+             </div>
+          )}
+
           {/* Progress Bar */}
           <div className="flex items-center gap-3 w-full group/seek">
             <span className="text-white text-xs font-medium font-mono min-w-[40px] text-right">
@@ -819,6 +844,7 @@ export default function App() {
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
   const [sourceLink, setSourceLink] = useState<string>("");
   const [sourceTracks, setSourceTracks] = useState<any[]>([]);
+  const [skipTimes, setSkipTimes] = useState<{intro?: {start: number, end: number}, outro?: {start: number, end: number}}>({});
   const [proxyNeeded, setProxyNeeded] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<AiringScheduleItem[]>([]);
@@ -997,6 +1023,7 @@ export default function App() {
 
       setSourceLink(data.link);
       setSourceTracks(data.tracks || []);
+      setSkipTimes({ intro: data.intro, outro: data.outro });
       setProxyNeeded(!!data.proxyNeeded);
       setServerErrors((prev) => ({ ...prev, [server.id]: false }));
     } catch (err: any) {
@@ -1086,14 +1113,16 @@ export default function App() {
             </form>
           </div>
 
-          <a 
-            href="/Animxer.apk" 
-            download="Animxer.apk"
-            className="hidden sm:flex items-center gap-2 px-4 py-2 bg-[#FF3E3E] hover:bg-[#ff5555] text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-[#FF3E3E]/20"
+          <button 
+            onClick={() => {
+              window.location.href = '/api/download-apk';
+            }}
+            className="flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-[#FF3E3E] hover:bg-[#ff5555] text-white rounded-xl text-[10px] sm:text-sm font-medium transition-colors shadow-lg shadow-[#FF3E3E]/20 shrink-0"
           >
-            <Download className="w-4 h-4" />
-            <span>Download APK</span>
-          </a>
+            <Download className="w-3 h-3 sm:w-4 sm:h-4" />
+            <span className="hidden sm:inline">Download APK</span>
+            <span className="sm:hidden">App</span>
+          </button>
         </div>
       </header>
 
@@ -1839,6 +1868,7 @@ export default function App() {
                     <HlsPlayer
                       src={sourceLink}
                       tracks={sourceTracks}
+                      skipTimes={skipTimes}
                       onEnded={handleVideoEnded}
                       proxyNeeded={proxyNeeded}
                     />

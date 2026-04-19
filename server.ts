@@ -316,6 +316,12 @@ app.get("/api/source", async (req, res) => {
                    if (rapidData && rapidData.tracks) {
                        sourceData.tracks = rapidData.tracks;
                    }
+                   if (rapidData && rapidData.intro) {
+                       sourceData.intro = rapidData.intro;
+                   }
+                   if (rapidData && rapidData.outro) {
+                       sourceData.outro = rapidData.outro;
+                   }
                }
            }
        } catch (e) {
@@ -323,7 +329,7 @@ app.get("/api/source", async (req, res) => {
        }
     }
 
-    res.json({ link: finalLink, type: sourceData.type, proxyNeeded, originalLink: sourceData.link, tracks: sourceData.tracks || [] });
+    res.json({ link: finalLink, type: sourceData.type, proxyNeeded, originalLink: sourceData.link, tracks: sourceData.tracks || [], intro: sourceData.intro, outro: sourceData.outro });
   } catch (error: any) {
     console.error(error);
     res.status(500).json({ error: error.message || "Failed to fetch source" });
@@ -400,6 +406,19 @@ app.get('/api/proxy', async (req, res) => {
         console.error("Proxy error", error);
         if (!res.headersSent) res.status(500).send("Proxy error");
     }
+});
+
+app.get('/api/download-apk', (req, res) => {
+    // This strictly forces a "Save As" download dialog natively in the browser
+    const apkFile = 'Animxer.apk';
+    const filePath = path.join(process.cwd(), process.env.NODE_ENV === 'production' ? 'dist' : 'public', apkFile);
+
+    res.download(filePath, apkFile, (err) => {
+        if (err) {
+            console.error("Failed to download APK:", err);
+            if (!res.headersSent) res.status(404).send("APK file not found.");
+        }
+    });
 });
 
 app.get('/api/schedule', async (req, res) => {
