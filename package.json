@@ -25,7 +25,7 @@
     "express": "^4.21.2",
     "gogoanime-api-new": "^1.0.27",
     "hls.js": "^1.6.16",
-    "http-proxy-middleware": "^3.0.5",
+    "http-proxy-middleware": "^3.0.7",
     "lucide-react": "^0.546.0",
     "motion": "^12.38.0",
     "pino-pretty": "^13.1.3",
